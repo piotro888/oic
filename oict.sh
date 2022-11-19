@@ -15,7 +15,7 @@ CCPROG=$1
 [ "$CCPROG" = --help ] && exit 2;
 shift
 
-t=""; d=""; c=""; ow=0; tl=3600; ml=300; tlf=0; pd=0; ban=0; tf=0; cmo=0; oc=0; q=0; cc=""; oif=0; ct=0;
+t=""; d=""; c=""; ow=0; tl=3600; ml=300; tlf=0; pd=0; ban=0; tf=0; cmo=0; oc=0; q=0; cc=""; oif=0; ma=0; ct=0;
 
 while [ -n "$1" ] ; do
     case "$1" in
@@ -36,6 +36,7 @@ while [ -n "$1" ] ; do
         -cc) cc=$2; if [ -z "$2" ]; then echo "ERROR: missing $1 value"; exit 1; fi; shift;;
 	    -oif) oif=1;;
         -ct) ct=1;;
+        -massif) ma=1;;
         --help) exit 2;;
         *) echo "ERROR: invalid option $1";;
     esac
@@ -131,6 +132,7 @@ if [ $oif = 1 ] && [ ! -d "$(dirname $testdir)/out" ] ; then echo "ERROR: Invali
 
 testdir=$(realpath $testdir)
 
+if [ $ma = 0 ]; then
 for i in $testdir/*.in; do
     [ -f "$i" ] || break
     
@@ -175,6 +177,16 @@ for i in $testdir/*.in; do
         [ -z $cc ] && [ $ct = 0 ] && ln -s -f $out tmp/tout/$testname.out #ln
     fi
 done
+fi
+
+tdir_in="tmp/tin"
+tdir_pout="tmp/out"
+tdir_out="tmp/tout"
+
+[ $ma = 1 ] && echo "SKIP checking test files"
+[ $ma = 1 ] && tdir_in=$testdir
+[ $ma = 1 ] && [ $oif = 0 ] && tdir_out=$testdir
+[ $ma = 1 ] && [ $oif = 1 ] && tdir_out="$(dirname $tdir_in)/out"
 
 function traphandler(){
     echo -e "\n\n  ***Received SIGINT, aborting test\n"
@@ -187,7 +199,7 @@ function traphandler(){
 echo "* Running tests"
 echo
 
-numtests=(tmp/tin/*.in)
+numtests=($tdir_in/*.in)
 numtests=${#numtests[@]}
 
 ac=1
@@ -204,7 +216,7 @@ kblimit=$((ml*1000));
 # maybe next in c++?
 
 # sort files in more obvious order
-filelist=$(ls -1 tmp/tin/*.in | sort -V)
+filelist=$(ls -1 $tdir_in/*.in | sort -V)
 
 #for i in tmp/tin/*.in; do
 for i in $filelist; do
@@ -227,7 +239,7 @@ for i in $filelist; do
     #timeout --preserve-status -k 5 -s SIGKILL $tl"s" ./tmp/bin/out < tmp/tin/$testname.in > tmp/out/$testname.out - can't exit with ctrl+c :( and less control so writed custom
     
     #run in bg and save pid
-    ( /usr/bin/time -v tmp/bin/out < tmp/tin/$testname.in > tmp/out/$testname.out  2> tmp/out/err) & 
+    ( /usr/bin/time -v tmp/bin/out < $tdir_in/$testname.in > $tdir_pout/$testname.out  2> $tdir_pout/err) & 
     timepid=$!
     ppid=""
 #    ps
@@ -237,6 +249,7 @@ for i in $filelist; do
 
     trap "traphandler $ppid" SIGINT  #set to abort test not program
 
+    timekillpid=-1
     if ps -p $timepid > /dev/null; then
        	prlimit --pid $ppid --as=$((ml*1000000)) #memory limit globally by ulimit
 	#echo -e "\n"
@@ -244,6 +257,7 @@ for i in $filelist; do
         #run in bg sleep and kill. send sigterm first sigkill after
         #ps #nice debug
         (sleep $tl && kill -SIGTERM $ppid 2> /dev/null && sleep 1 && kill -SIGKILL $ppid 2> /dev/null) & 
+        timekillpid=$!
         [ $q = 0 ] && echo -n " TPID: $timepid PPID: $ppid"
         #prlimit --pid $pid --as=$((ml*1000)) #fixthis
         #waits for pid - tested program. if time less than $tle finished itself in other case killed by signal
@@ -252,12 +266,16 @@ for i in $filelist; do
     fi
     wait $timepid 2> /dev/null > /dev/null
     retcode=$? #wait also returns exit code of waiting process
+
     endtime=$(date +%s%3N)
+
+    [ $timekillpid = -1 ] || kill $timekillpid > /dev/null 2> /dev/null
+
     deltatime=$((endtime-starttime))
     timereadable="$(printf %02d $((deltatime/1000))).$(printf %03d $((deltatime%1000))) s"
     [ $q = 0 ] && echo " ET: $endtime DT: $deltatime RT: $retcode"
-    head -n -24 tmp/out/err
-    usrtimeout=$(tail -n -24 tmp/out/err)
+    head -n -24 $tdir_pout/err
+    usrtimeout=$(tail -n -24 $tdir_pout/err)
     
     maxmem=$(echo $usrtimeout | sed -E  's/.*Maximum resident set size \(kbytes\): ([0-9]+).*/\1/')
     usrtime=$(echo $usrtimeout | sed -E  's/.*User time \(seconds\): ([0-9]+.[0-9]+).*/\1/')
@@ -313,8 +331,8 @@ for i in $filelist; do
         ac=0
         table=$table"|   $(printf %02d $testcnt)   | \033[0;34m[RE]_\033[0m  |  $timereadable  | $ustimereadable  | $memreadable | $testname\n"
     else
-        ccint=$(cat tmp/tin/$testname.in)"\n\n\n"$(cat tmp/out/$testname.out)"\n"
-        if [ -z $cc ]; then diff -bwq --strip-trailing-cr tmp/out/$testname.out tmp/tout/$testname.out > /dev/null 
+        ccint=$(cat $tdir_in/$testname.in)"\n\n\n"$(cat $tdir_pout/$testname.out)"\n"
+        if [ -z $cc ]; then diff -bwq --strip-trailing-cr $tdir_pout/$testname.out $tdir_out/$testname.out > /dev/null 
         else echo -e $ccint | tmp/bin/customchecker  > /dev/null; fi
         dr=$?
 
@@ -322,7 +340,7 @@ for i in $filelist; do
             accnt=$((accnt+1))
             echo -e "\033[0;32m[AC]_\033[0m Accepted"
             [ $pd = 1 ] && echo -n "Checker out: "
-            [ $pd = 1 ] && [ -z $cc ] && diff --strip-trailing-cr tmp/out/$testname.out tmp/tout/$testname.out
+            [ $pd = 1 ] && [ -z $cc ] && diff --strip-trailing-cr $tdir_pout/$testname.out $tdir_out/$testname.out
             [ $pd = 1 ] && [ ! -z $cc ] && echo -e $ccint | tmp/bin/customchecker
             table=$table"|   $(printf %02d $testcnt)   | \033[0;32m[AC]_\033[0m  |  $timereadable  | $ustimereadable  | $memreadable | $testname\n"
         else
@@ -330,7 +348,7 @@ for i in $filelist; do
             echo -e "\033[0;31m[WA]_\033[0m Wrong Answer"
             ac=0
             [ $pd = 1 ] && echo -n "Checker out: "
-            [ $pd = 1 ] && [ -z $cc ] && diff --strip-trailing-cr tmp/out/$testname.out tmp/tout/$testname.out
+            [ $pd = 1 ] && [ -z $cc ] && diff --strip-trailing-cr $tdir_pout/$testname.out $tdir_out/$testname.out
             [ $pd = 1 ] && [ ! -z $cc ] && echo -e $ccint | tmp/bin/customchecker
             table=$table"|   $(printf %02d $testcnt)   | \033[0;31m[WA]_\033[0m  |  $timereadable  | $ustimereadable  | $memreadable | $testname\n"
         fi

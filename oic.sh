@@ -23,6 +23,7 @@ function testhelp {
     echo "-oc - ignore existing .out and generate outputs with -c program (without overwritting)"
     echo "-cmo - generate only missing .out files with -c program"
     echo "-oif - use oi test format (.in in in/ subdir and .out in out/)"
+    echo "-massif - skip checking and linking test files"
     echo "-cf - copy test files to temp dir instead of soft linking"
     echo "-ban - banner status"
     exit 0
@@ -48,7 +49,7 @@ function genhelp {
 echo "+--------------------------+"
 echo "|     OI CHECK SUITE       |"
 echo "|        BY PIOTRO         |"
-echo "|   OICT v1.1  OICG v1.0   |"
+echo "|   OICT v1.2  OICG v1.0   |"
 echo "+--------------------------+"
 echo
 
